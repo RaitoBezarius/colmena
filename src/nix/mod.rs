@@ -55,6 +55,9 @@ pub struct NodeName(#[serde(deserialize_with = "NodeName::deserialize")] String)
 
 #[derive(Debug, Clone, Validate, Deserialize)]
 pub struct NodeConfig {
+    #[serde(rename = "systemType")]
+    system_type: Option<String>,
+
     #[serde(rename = "targetHost")]
     target_host: Option<String>,
 

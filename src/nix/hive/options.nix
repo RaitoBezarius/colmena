@@ -98,6 +98,14 @@ with builtins; rec {
   in {
     options = {
       deployment = {
+        systemType = lib.mkOption {
+          description = mdDoc ''
+            System type used for this node, e.g. NixOS.
+          '';
+          default = "nixos";
+          # TODO: enum among all registered systems?
+          type = types.str;
+        };
         targetHost = lib.mkOption {
           description = mdDoc ''
             The target SSH node for deployment.
@@ -216,6 +224,42 @@ with builtins; rec {
           default = [];
         };
       };
+    };
+  };
+  # Options for a registered system type
+  systemTypeOptions = { lib, ... }: let
+    inherit (lib) types;
+    mdDoc = lib.mdDoc or lib.id;
+  in
+  {
+    options = {
+      evalConfig = lib.mkOption {
+        description = mdDoc ''
+          Evaluation function which share the same interface as `nixos/lib/eval-config.nix`
+          which can be tailored to your own usecases or to target another type of system,
+          e.g. nix-darwin.
+        '';
+        type = types.functionTo types.unspecified;
+      };
+      defaults = lib.mkOption {
+        description = mdDoc ''
+          Default configuration for that system type.
+        '';
+        type = types.functionTo types.unspecified;
+        default = _: {};
+      };
+    };
+  };
+  registryOptions = { lib, ... }: let
+    inherit (lib) types;
+    mdDoc = lib.mdDoc or lib.id;
+  in
+  {
+    options.registry = lib.mkOption {
+      description = mdDoc ''
+        A registry of all system types.
+      '';
+      type = types.attrsOf (types.submodule systemTypeOptions);
     };
   };
   # Hive-wide options

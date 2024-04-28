@@ -15,7 +15,7 @@ use validator::Validate;
 use super::deployment::TargetNode;
 use super::{
     Flake, MetaConfig, NixExpression, NixFlags, NodeConfig, NodeFilter, NodeName,
-    ProfileDerivation, SerializedNixExpression, StorePath,
+    ProfileDerivation, RegistryConfig, SerializedNixExpression, StorePath,
 };
 use crate::error::{ColmenaError, ColmenaResult};
 use crate::job::JobHandle;
@@ -87,6 +87,8 @@ pub struct Hive {
     nix_options: HashMap<String, String>,
 
     meta_config: OnceCell<MetaConfig>,
+
+    registry_config: OnceCell<RegistryConfig>,
 }
 
 struct NixInstantiate<'hive> {
@@ -140,6 +142,7 @@ impl Hive {
             impure: false,
             nix_options: HashMap::new(),
             meta_config: OnceCell::new(),
+            registry_config: OnceCell::new(),
         })
     }
 
@@ -151,6 +154,17 @@ impl Hive {
         self.meta_config
             .get_or_try_init(|| async {
                 self.nix_instantiate("hive.metaConfig")
+                    .eval()
+                    .capture_json()
+                    .await
+            })
+            .await
+    }
+
+    pub async fn get_registry_config(&self) -> ColmenaResult<&RegistryConfig> {
+        self.registry_config
+            .get_or_try_init(|| async {
+                self.nix_instantiate("hive.registryConfig")
                     .eval()
                     .capture_json()
                     .await

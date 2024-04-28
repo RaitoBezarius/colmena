@@ -38,11 +38,17 @@ let
     else if uncheckedHive ? network then uncheckedHive.network
     else {};
 
+  uncheckedRegistries = if uncheckedHive ? registry then uncheckedHive.registry else {};
+
   # The final hive will always have the meta key instead of network.
   hive = let
     userMeta = (lib.modules.evalModules {
       modules = [ colmenaOptions.metaOptions uncheckedUserMeta ];
     }).config;
+
+    registry = (lib.modules.evalModules {
+      modules = [ colmenaOptions.registryOptions  { registry = uncheckedRegistries; } ];
+    }).config.registry;
 
     mergedHive =
       assert lib.assertMsg (!(uncheckedHive ? __schema)) ''
@@ -50,7 +56,7 @@ let
 
         Hint: Use the `colmenaHive` output instead of `colmena`.
       '';
-      removeAttrs (defaultHive // uncheckedHive) [ "meta" "network" ];
+      removeAttrs (defaultHive // uncheckedHive) [ "meta" "network" "registry" ];
 
     meta = {
       meta =
@@ -58,7 +64,7 @@ let
         then userMeta // { nixpkgs = <nixpkgs>; }
         else userMeta;
     };
-  in mergedHive // meta;
+  in mergedHive // meta // { inherit registry; };
 
   configsFor = node: let
     nodeConfig = hive.${node};
@@ -112,14 +118,23 @@ let
   in mkNixpkgs "meta.nixpkgs" nixpkgsConf;
 
   lib = nixpkgs.lib;
-  reservedNames = [ "defaults" "network" "meta" ];
+  reservedNames = [ "defaults" "network" "meta" "registry" ];
 
-  evalNode = name: configs: let
+  evalNode = name: configs:
+  # Some help on error messages.
+  assert (lib.assertMsg (lib.hasAttrByPath [ "deployment" "systemType" ] hive.${name})
+  "${name} does not have a deployment system type!");
+  assert (lib.assertMsg (builtins.typeOf hive.registry == "set"))
+    "The hive's registry is not a set, but of type '${builtins.typeOf hive.registry}'";
+  assert (lib.assertMsg (lib.hasAttr hive.${name}.deployment.systemType hive.registry)
+    "${builtins.toJSON (hive.${name}.deployment.systemType)} does not exist in the registry of systems!");
+  let
+    # We cannot use `configs` because we need to access to the raw configuration fragment.
+    inherit (hive.registry.${hive.${name}.deployment.systemType}) evalConfig;
     npkgs =
       if hasAttr name hive.meta.nodeNixpkgs
       then mkNixpkgs "meta.nodeNixpkgs.${name}" hive.meta.nodeNixpkgs.${name}
       else nixpkgs;
-    evalConfig = import (npkgs.path + "/nixos/lib/eval-config.nix");
 
     # Here we need to merge the configurations in meta.nixpkgs
     # and in machine config.
@@ -139,9 +154,13 @@ let
       in
         lib.optional (!hasTypedConfig && length remainingKeys != 0)
         "The following Nixpkgs configuration keys set in meta.nixpkgs will be ignored: ${toString remainingKeys}";
-    };
+      } // lib.optionalAttrs (builtins.hasAttr "localSystem" npkgs || builtins.hasAttr "crossSystem" npkgs) {
+        nixpkgs.localSystem = lib.mkBefore npkgs.localSystem;
+        nixpkgs.crossSystem = lib.mkBefore npkgs.crossSystem;
+      };
   in evalConfig {
-    inherit (npkgs) system;
+    # This doesn't exist for `evalModules` the generic way.
+    # inherit (npkgs) system;
 
     modules = [
       nixpkgsModule
@@ -149,7 +168,7 @@ let
       colmenaModules.keyChownModule
       colmenaModules.keyServiceModule
       colmenaOptions.deploymentOptions
-      hive.defaults
+      (hive.registry.${hive.${name}.deployment.systemType}.defaults or hive.defaults)
     ] ++ configs;
     specialArgs = {
       inherit name;
@@ -179,6 +198,8 @@ let
     "allowApplyAll"
   ];
 
+  serializableSystemTypeConfigKeys = [ ];
+
 in rec {
   # Exported attributes
   __schema = "v0";
@@ -190,5 +211,9 @@ in rec {
   evalSelected =             names: lib.filterAttrs (name: _: elem name names) toplevel;
   evalSelectedDrvPaths =     names: lib.mapAttrs    (_: v: v.drvPath)          (evalSelected names);
   metaConfig = lib.filterAttrs (n: v: elem n metaConfigKeys) hive.meta;
+  # We cannot perform a `metaConfigKeys`-style simple check here
+  # because registry is arbitrarily deep and may evaluate nixpkgs indirectly.
+  registryConfig = lib.mapAttrs (systemTypeName: systemType:
+    lib.filterAttrs (n: v: elem n serializableSystemTypeConfigKeys) systemType) hive.registry;
   introspect = f: f { inherit lib; pkgs = nixpkgs; nodes = uncheckedNodes; };
 }

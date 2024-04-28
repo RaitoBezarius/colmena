@@ -211,7 +211,12 @@ let
   };
 in {
   inherit pkgs nodes colmena colmenaExec
-    getStandaloneConfigFor inputClosureOf;
+  getStandaloneConfigFor inputClosureOf;
+
+  liminix = builtins.fetchTarball {
+    url = "https://github.com/RaitoBezarius/liminix/archive/refs/heads/colmena--compat.tar.gz";
+    hash = lib.fakeHash;
+  };
 
   runTest = module: (evalTest ({ config, ... }: {
     imports = [ module { inherit nodes; } ];
